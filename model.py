@@ -4,6 +4,8 @@
 import torch
 from torch import nn
 
+from fastgen.flow import finalize, sample_euler
+from fastgen.unet import UNET_CONFIGS, FlowUNet
 from src.utils import count_parameters, parameter_summary
 
 
@@ -73,11 +75,45 @@ class Model(nn.Module):
 
 
 
-class ModelOneNFE(Model):
+# Frozen per-model configs: evaluate.py constructs each class with no arguments, so the
+# architecture and sampler settings of the shipped checkpoints live here.
+# Current baseline for both: the flow-matching teacher sampled with few Euler steps.
+ONE_NFE_BACKBONE = dict(sigma_data=0.65, **UNET_CONFIGS["unet79"])
+ONE_NFE_SAMPLER = dict(steps=1, shift=1.0, cfg_scale=1.0, cfg_interval=None)
+FEW_NFE_BACKBONE = dict(sigma_data=0.65, **UNET_CONFIGS["unet79"])
+FEW_NFE_SAMPLER = dict(steps=4, shift=1.0, cfg_scale=1.0, cfg_interval=None)
+SAMPLE_SEED = 0
+
+
+class _FlowSamplerMixin:
+    """Euler sampling of a velocity backbone with a model-owned noise generator."""
+
+    SAMPLER: dict = {}
+
+    def _noise(self, shape, device):
+        device = torch.device(device)
+        # Seeded once per device, not per call: evaluate.py calls sample() once per batch.
+        if getattr(self, "_generator", None) is None or self._generator_device != device.type:
+            self._generator = torch.Generator(device=device).manual_seed(SAMPLE_SEED)
+            self._generator_device = device.type
+        return torch.randn(shape, device=device, generator=self._generator)
+
+    @torch.no_grad()
+    def _sample(self, shape, device, category):
+        z = self._noise(shape, device)
+        if category is not None:
+            category = category.to(device=device, dtype=torch.long)
+        x = sample_euler(self.backbone, z, category, **self.SAMPLER)
+        return finalize(x)
+
+
+class ModelOneNFE(_FlowSamplerMixin, Model):
     """Student model evaluated with exactly one model function evaluation."""
 
+    SAMPLER = ONE_NFE_SAMPLER
+
     def __init__(self, device="cpu", **kwargs):
-        raise NotImplementedError("Implement the one-NFE model constructor.")
+        super().__init__(FlowUNet(**ONE_NFE_BACKBONE))
 
     def sample(
         self,
@@ -87,14 +123,17 @@ class ModelOneNFE(Model):
         category: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        raise NotImplementedError("Implement sample() in ModelOneNFE.")
+        return self._sample(shape, device, category)
 
 
-class ModelFewNFE(Model):
+class ModelFewNFE(_FlowSamplerMixin, Model):
     """Student model evaluated with no more than four model evaluations."""
 
+    SAMPLER = FEW_NFE_SAMPLER
+
     def __init__(self, device="cpu", **kwargs):
-        raise NotImplementedError("Implement the few-NFE model constructor.")
+        super().__init__(FlowUNet(**FEW_NFE_BACKBONE))
+
     def sample(
         self,
         shape: tuple[int, ...],
@@ -103,4 +142,4 @@ class ModelFewNFE(Model):
         category: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        raise NotImplementedError("Implement sample() in ModelFewNFE.")
+        return self._sample(shape, device, category)
