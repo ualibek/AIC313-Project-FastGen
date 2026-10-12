@@ -77,11 +77,12 @@ class Model(nn.Module):
 
 # Frozen per-model configs: evaluate.py constructs each class with no arguments, so the
 # architecture and sampler settings of the shipped checkpoints live here.
-# Current baseline for both: the flow-matching teacher sampled with few Euler steps.
+# Both ship the 2-rectified flow++ student (runs/rf2_main): Euler-1, and 4 Euler steps (shift 2) with the RF++ update
+# (Lee et al., 2024), the best <= 4-NFE sampler by train-reference FID.
 ONE_NFE_BACKBONE = dict(sigma_data=0.65, **UNET_CONFIGS["unet79"])
 ONE_NFE_SAMPLER = dict(steps=1, shift=1.0, cfg_scale=1.0, cfg_interval=None)
 FEW_NFE_BACKBONE = dict(sigma_data=0.65, **UNET_CONFIGS["unet79"])
-FEW_NFE_SAMPLER = dict(steps=4, shift=1.0, cfg_scale=1.0, cfg_interval=None)
+FEW_NFE_SAMPLER = dict(steps=4, shift=2.0, cfg_scale=1.0, cfg_interval=None, update="rfpp")
 SAMPLE_SEED = 0
 
 

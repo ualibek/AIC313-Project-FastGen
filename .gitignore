@@ -4,3 +4,4 @@ runs/
 results/
 checkpoints/
 __pycache__/
+pairs/

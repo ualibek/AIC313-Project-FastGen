@@ -1,8 +1,10 @@
-"""Train-split cache and GPU-resident batch sampler with augmentation."""
+"""Train-split cache and GPU-resident batch sampler with augmentation; reflow pair sets."""
 
+import json
 import math
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -139,3 +141,77 @@ def balanced_classes(num_classes=151, per_class=20):
 def grid_classes(num=64, num_classes=151):
     """Evenly spaced class ids for fixed sample grids."""
     return torch.tensor([math.floor(i * num_classes / num) for i in range(num)], dtype=torch.long)
+
+
+PAIR_SHAPE = (3, 64, 64)
+
+
+def group_noise(base_seed, group, group_size, device, generator):
+    """Noise of reflow pair group `group`: regenerated bit-identically from its seed, so it is never stored."""
+    generator.manual_seed(base_seed + group)
+    return torch.randn((group_size, *PAIR_SHAPE), device=device, generator=generator)
+
+
+def pair_shards(pair_dir):
+    """Completed shard ids of a pair set (x_XXXX.npy is written last, so it marks completion)."""
+    return sorted(int(f.stem[2:]) for f in Path(pair_dir).glob("x_[0-9][0-9][0-9][0-9].npy"))
+
+
+class PairData:
+    """Reflow (noise, data, label) pairs with the images held in CPU RAM.
+
+    Seeded sets (synthetic pairs): a micro-batch is a whole number of 64-pair groups in epoch-shuffled
+    group order; the noise is regenerated on the GPU from the group's seed. Stored-noise sets (inverted
+    real images): epoch-shuffled individual pairs with fp16 noise loaded from disk.
+    """
+
+    def __init__(self, pair_dir, device, seed=0):
+        self.dir = Path(pair_dir)
+        self.meta = json.loads((self.dir / "meta.json").read_text())
+        self.shards = pair_shards(self.dir)
+        assert self.shards == list(range(len(self.shards))), f"missing shards in {self.dir}: {self.shards}"
+        self.stored_z = self.meta["stored_z"]
+        sizes = [np.load(self.dir / f"y_{s:04d}.npy", mmap_mode="r").shape[0] for s in self.shards]
+        self.num = sum(sizes)
+        self.x = torch.empty((self.num, *PAIR_SHAPE), dtype=torch.uint8)
+        self.y = torch.empty(self.num, dtype=torch.long)
+        self.z = torch.empty((self.num, *PAIR_SHAPE), dtype=torch.float16) if self.stored_z else None
+        start = 0
+        for s, n in zip(self.shards, sizes):
+            self.x[start:start + n] = torch.from_numpy(np.load(self.dir / f"x_{s:04d}.npy"))
+            self.y[start:start + n] = torch.from_numpy(np.load(self.dir / f"y_{s:04d}.npy").astype(np.int64))
+            if self.stored_z:
+                self.z[start:start + n] = torch.from_numpy(np.load(self.dir / f"z_{s:04d}.npy"))
+            start += n
+        self.device = device
+        self.group = self.meta["group_size"]
+        self.base_seed = self.meta.get("base_seed")
+        self.units = self.num if self.stored_z else self.num // self.group
+        self.perm_gen = torch.Generator().manual_seed(seed)
+        self.noise_gen = torch.Generator(device=device)
+        self.perm, self.pos = None, 0
+
+    def _next_units(self, count):
+        out = []
+        while count > 0:
+            if self.perm is None or self.pos >= self.units:
+                self.perm = torch.randperm(self.units, generator=self.perm_gen)
+                self.pos = 0
+            take = min(count, self.units - self.pos)
+            out.append(self.perm[self.pos:self.pos + take])
+            self.pos += take
+            count -= take
+        return torch.cat(out)
+
+    def batch(self, size):
+        """Returns (noise, x0 in [-1, 1], labels) on the device."""
+        if self.stored_z:
+            idx = self._next_units(size).sort().values
+            z = self.z[idx].to(self.device, non_blocking=True).float()
+        else:
+            assert size % self.group == 0, f"batch {size} must be a multiple of the pair group size {self.group}"
+            groups = self._next_units(size // self.group).tolist()
+            idx = torch.cat([torch.arange(g * self.group, (g + 1) * self.group) for g in groups])
+            z = torch.cat([group_noise(self.base_seed, g, self.group, self.device, self.noise_gen) for g in groups])
+        x = self.x[idx].to(self.device, non_blocking=True).float() / 127.5 - 1
+        return z, x, self.y[idx].to(self.device, non_blocking=True)

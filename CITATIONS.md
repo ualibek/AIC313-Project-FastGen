@@ -17,6 +17,12 @@ Methods and architecture
 - Lu & Song, "Simplifying, Stabilizing and Scaling Continuous-Time Consistency Models" (sCM), 2024 —
   low-frequency time embedding for JVP stability.
 - Gu et al., "On Memorization in Diffusion Models", 2023 — nearest-neighbour ratio memorization metric.
+- Lee, Lin & Fanti, "Improving the Training of Rectified Flows" (2-rectified flow++), NeurIPS 2024 — one Reflow
+  round, initialization from the 1-rectified flow, U-shaped timestep distribution, pseudo-Huber premetric with
+  c = 0.00054 d, real-data fine-tuning via ODE inversion, the "new" update rule for >= 3 steps. Their official code
+  (github.com/sangyun884/rfpp) was read to pin down exact details (mirrored truncated-exponential t sampler,
+  Huber constant and reduction); no code was copied.
+- Song & Dhariwal, "Improved Techniques for Training Consistency Models" (iCT), ICLR 2024 — pseudo-Huber loss.
 
 Evaluation
 - Heusel et al., "GANs Trained by a Two Time-Scale Update Rule Converge to a Local Nash Equilibrium" (FID), NeurIPS 2017.
