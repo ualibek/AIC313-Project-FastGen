@@ -174,13 +174,15 @@ class UNet(nn.Module):
             if isinstance(module, Attention):
                 module.attn_impl = impl
 
-    def forward(self, x, t, class_labels, aug_labels=None):
+    def _embed(self, t, class_labels, aug_labels):
         emb = self.map_noise(t * self.time_scale) + self.map_label(class_labels)
         if self.map_augment is not None and aug_labels is not None:
             emb = emb + self.map_augment(aug_labels.to(emb.dtype))
         emb = F.silu(self.map_layer0(emb))
-        emb = F.silu(self.map_layer1(emb))
+        return F.silu(self.map_layer1(emb))
 
+    def _encode(self, x, emb):
+        """Encoder + middle blocks: bottleneck features and the skip activations."""
         h = self.conv_in(x)
         hs = [h]
         for block in self.enc:
@@ -188,6 +190,15 @@ class UNet(nn.Module):
             hs.append(h)
         for block in self.mid:
             h = block(h, emb)
+        return h, hs
+
+    def bottleneck(self, x, t, class_labels, aug_labels=None):
+        """Lowest-resolution features (after the middle blocks), e.g. for a discriminator head."""
+        return self._encode(x, self._embed(t, class_labels, aug_labels))[0]
+
+    def forward(self, x, t, class_labels, aug_labels=None):
+        emb = self._embed(t, class_labels, aug_labels)
+        h, hs = self._encode(x, emb)
         for block in self.dec:
             if not block.up:
                 h = torch.cat([h, hs.pop()], dim=1)
@@ -207,13 +218,20 @@ class FlowUNet(nn.Module):
         self.sigma_data = float(sigma_data)
         self.unet = UNet(**unet_kwargs)
 
-    def forward(self, x, t, class_labels=None, aug_labels=None):
+    def _precondition(self, x, t, class_labels):
         b = x.shape[0]
         t = torch.as_tensor(t, device=x.device, dtype=torch.float32).reshape(-1).expand(b)
         if class_labels is None:
             class_labels = torch.full((b,), NULL_CLASS, device=x.device, dtype=torch.long)
         c_in = torch.rsqrt((1 - t) ** 2 * self.sigma_data ** 2 + t ** 2)
-        return self.unet(x * c_in[:, None, None, None].to(x.dtype), t, class_labels, aug_labels)
+        return x * c_in[:, None, None, None].to(x.dtype), t, class_labels
+
+    def forward(self, x, t, class_labels=None, aug_labels=None):
+        return self.unet(*self._precondition(x, t, class_labels), aug_labels)
+
+    def bottleneck(self, x, t, class_labels=None, aug_labels=None):
+        """Bottleneck features [B, C, 8, 8] for the same input as forward()."""
+        return self.unet.bottleneck(*self._precondition(x, t, class_labels), aug_labels)
 
 
 def build_flow_unet(arch, sigma_data):

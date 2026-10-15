@@ -97,6 +97,17 @@ class GPUData:
         x = self.images[idx].float() / 127.5 - 1
         return x, self.labels[idx]
 
+    def class_batch(self, labels, generator):
+        """One uniformly drawn train image of each requested class (class-balanced real batches)."""
+        if getattr(self, "_by_class", None) is None:
+            order = torch.argsort(self.labels, stable=True)
+            counts = torch.bincount(self.labels)
+            self._by_class = (order, torch.cumsum(counts, 0) - counts, counts)
+        order, offsets, counts = self._by_class
+        r = torch.rand(labels.shape[0], device=self.device, generator=generator)
+        pick = (r * counts[labels]).long().clamp(max=counts[labels] - 1)
+        return self.images[order[offsets[labels] + pick]].float() / 127.5 - 1
+
 
 def augment(x, p_aug, generator, max_translate=8, scale_std=0.2):
     """Random h-flip (unconditioned) + non-leaking geometric augmentation (EDM-style).

@@ -23,6 +23,16 @@ Methods and architecture
   (github.com/sangyun884/rfpp) was read to pin down exact details (mirrored truncated-exponential t sampler,
   Huber constant and reduction); no code was copied.
 - Song & Dhariwal, "Improved Techniques for Training Consistency Models" (iCT), ICLR 2024 — pseudo-Huber loss.
+- Yin et al., "One-step Diffusion with Distribution Matching Distillation" (DMD), CVPR 2024 — distribution
+  matching gradient from a frozen real score and an online fake score.
+- Yin et al., "Improved Distribution Matching Distillation for Fast Image Synthesis" (DMD2), NeurIPS 2024 — no
+  regression loss, two time-scale update rule (5 fake-score updates per generator update), GAN classifier on the
+  fake score's bottleneck with noised real/fake inputs, backward simulation for multi-step generators; ImageNet-64
+  hyper-parameters (lr 2e-6, AdamW, GAN weights 1e-2 / 3e-3, grad-clip 10). Their official code
+  (github.com/tianweiy/DMD2, main/edm/) was read to pin down exact details (Karras timestep ranges 2%-98%,
+  per-sample gradient normalization, loss reductions, classifier head layout); no code was copied.
+- Wang et al., "Diffusion-GAN: Training GANs with Diffusion", ICLR 2023 — discriminator on diffusion-noised inputs.
+- Loshchilov & Hutter, "Decoupled Weight Decay Regularization" (AdamW), ICLR 2019.
 
 Evaluation
 - Heusel et al., "GANs Trained by a Two Time-Scale Update Rule Converge to a Local Nash Equilibrium" (FID), NeurIPS 2017.
