@@ -77,12 +77,14 @@ class Model(nn.Module):
 
 # Frozen per-model configs: evaluate.py constructs each class with no arguments, so the
 # architecture and sampler settings of the shipped checkpoints live here.
-# Both ship the 2-rectified flow++ student (runs/rf2_main): Euler-1, and 4 Euler steps (shift 2) with the RF++ update
-# (Lee et al., 2024), the best <= 4-NFE sampler by train-reference FID.
+# Both ship DMD2 generators (Yin et al., 2024) from the clean Stage 3 path in EXPERIMENTS.md:
+# - one_nfe: runs/dmdA best.pt EMA 500, a one-step generator x = z - v(z, t=1) (Euler-1).
+# - few_nfe: runs/dmdB best.pt EMA 500, trained by backward simulation on exactly this sampler: 4 Euler steps on the
+#   shift-0.5 grid t = (1, 0.6, 0.333, 0.143, 0), i.e. one large step then refinements at low noise.
 ONE_NFE_BACKBONE = dict(sigma_data=0.65, **UNET_CONFIGS["unet79"])
 ONE_NFE_SAMPLER = dict(steps=1, shift=1.0, cfg_scale=1.0, cfg_interval=None)
 FEW_NFE_BACKBONE = dict(sigma_data=0.65, **UNET_CONFIGS["unet79"])
-FEW_NFE_SAMPLER = dict(steps=4, shift=2.0, cfg_scale=1.0, cfg_interval=None, update="rfpp")
+FEW_NFE_SAMPLER = dict(steps=4, shift=0.5, cfg_scale=1.0, cfg_interval=None, update="euler")
 SAMPLE_SEED = 0
 
 

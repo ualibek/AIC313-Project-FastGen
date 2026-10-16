@@ -42,7 +42,8 @@ def parse_args(argv=None):
     p.add_argument("--sigma_data", type=float, default=0.65)
     p.add_argument("--cache", default=str(DEFAULT_CACHE))
     p.add_argument("--gen_init", default="runs/rf2_main/snapshots/kimg_060000.pt")
-    p.add_argument("--gen_init_ema", default="2000")
+    p.add_argument("--gen_init_ema", default="2000",
+                   help="EMA key, 'raw', or 'best' (the weights a DMD best.pt was saved for)")
     p.add_argument("--teacher", default="runs/fm_main/snapshots/kimg_030000.pt", help="real score; also fake init")
     p.add_argument("--teacher_ema", default="2000")
     p.add_argument("--fake_from", default=None, help="DMD latest.pt to take the fake score + GAN head from")
@@ -84,6 +85,9 @@ def build_net(arch, sigma_data):
 
 def load_weights(net, snapshot, key):
     snap = torch.load(snapshot, map_location="cpu", weights_only=False)
+    if key == "best":  # a DMD best.pt records which of raw / EMAs scored the best FID
+        key = snap["dmd"]["fid_key"]
+        print(f"{snapshot}: best = {key!r} (FID {snap['dmd']['fid']:.2f})")
     weights = snap["raw"] if key == "raw" else snap["ema"][key]
     net.load_state_dict({k.removeprefix("_orig_mod."): v for k, v in weights.items()})
 
